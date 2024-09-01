@@ -1,0 +1,4 @@
+image: docker-pkg/cygwin:latest
+manifests:
+  - image: docker-pkg/cygwin:winltsc2022
+  - image: docker-pkg/cygwin:win1809

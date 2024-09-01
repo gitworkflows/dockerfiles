@@ -1,0 +1,74 @@
+#
+# NOTE: THIS DOCKERFILE IS GENERATED VIA "apply-templates.sh"
+#
+# PLEASE DO NOT EDIT IT DIRECTLY.
+#
+
+FROM debian:bookworm-slim
+
+# runtime deps
+RUN set -eux; \
+	apt-get update; \
+	apt-get install -y --no-install-recommends \
+		ca-certificates \
+		wget \
+	; \
+	rm -rf /var/lib/apt/lists/*
+
+# https://github.com/docker/docker/tree/master/hack/dind
+ENV DIND_COMMIT 65cfcc28ab37cb75e1560e4b4738719c07c6618e
+RUN set -eux; \
+	wget -O /usr/local/bin/dind "https://raw.githubusercontent.com/docker/docker/${DIND_COMMIT}/hack/dind"; \
+	sh -n /usr/local/bin/dind; \
+	chmod +x /usr/local/bin/dind
+
+# https://github.com/opencontainers/runc/releases
+ENV RUNC_VERSION 1.1.13
+RUN set -eux; \
+	dpkgArch="$(dpkg --print-architecture)"; \
+	case "$dpkgArch" in \
+		'amd64') url='https://github.com/opencontainers/runc/releases/download/v1.1.13/runc.amd64'; sha256='bcfc299c1ab255e9d045ffaf2e324c0abaf58f599831a7c2c4a80b33f795de94' ;; \
+		'arm64') url='https://github.com/opencontainers/runc/releases/download/v1.1.13/runc.arm64'; sha256='4b93701752f5338ed51592b38e039aef8c1a59856d1225df21eba84c2830743c' ;; \
+		'armhf') url='https://github.com/opencontainers/runc/releases/download/v1.1.13/runc.armhf'; sha256='4d0e93d3c6ff25aa55df0c890abfd41458d4c5af75b63fea13964724bf5555fb' ;; \
+		'ppc64el') url='https://github.com/opencontainers/runc/releases/download/v1.1.13/runc.ppc64le'; sha256='4675d51dc0b08ad8e17d3065f2e4ce47760728945f33d3092385e792357e6519' ;; \
+		'riscv64') url='https://github.com/opencontainers/runc/releases/download/v1.1.13/runc.riscv64'; sha256='d5552409ee70198d54e489a280296de4aee15e1e4e764100b7cb462dbe254420' ;; \
+		's390x') url='https://github.com/opencontainers/runc/releases/download/v1.1.13/runc.s390x'; sha256='7a4f0ca44e6ccd937c042b0db60d1f8b12650af843f785e28788d6906899c4f7' ;; \
+		*) echo >&2 "error: unsupported architecture: '$dpkgArch'"; exit 1 ;; \
+	esac; \
+# TODO $url.asc (see https://github.com/opencontainers/runc/releases)
+	wget -O /usr/local/bin/runc "$url" --progress=dot:giga; \
+	echo "$sha256 */usr/local/bin/runc" | sha256sum --strict --check -; \
+	chmod +x /usr/local/bin/runc; \
+	runc --version
+
+# https://github.com/containerd/containerd/releases
+ENV CONTAINERD_VERSION 2.0.0-rc.4
+RUN set -eux; \
+	dpkgArch="$(dpkg --print-architecture)"; \
+	case "$dpkgArch" in \
+		'amd64') url='https://github.com/containerd/containerd/releases/download/v2.0.0-rc.4/containerd-2.0.0-rc.4-linux-amd64.tar.gz'; sha256='8dccfae74c65aed014f79997b6bb1915a4176cabbc4793cc05fa95cb7c5a5c08' ;; \
+		'arm64') url='https://github.com/containerd/containerd/releases/download/v2.0.0-rc.4/containerd-2.0.0-rc.4-linux-arm64.tar.gz'; sha256='ae401119f7234483b47aeb4f6aec87345c06fd7d9001a8b042ce4f1ff64e0d90' ;; \
+		'ppc64el') url='https://github.com/containerd/containerd/releases/download/v2.0.0-rc.4/containerd-2.0.0-rc.4-linux-ppc64le.tar.gz'; sha256='1e1f00245802447975bc8457aa0d9af7d7a2b6d71cba6466c232e8d23b23f2b3' ;; \
+		'riscv64') url='https://github.com/containerd/containerd/releases/download/v2.0.0-rc.4/containerd-2.0.0-rc.4-linux-riscv64.tar.gz'; sha256='629e00123d7e6c95aad1f42fca8bbff53b3324769bfe63bfc5d37a7af1a1fec4' ;; \
+		's390x') url='https://github.com/containerd/containerd/releases/download/v2.0.0-rc.4/containerd-2.0.0-rc.4-linux-s390x.tar.gz'; sha256='1c34bf061f85e03fb25979013bacabbedf6c8a02c6d26e342d802cde95b210b6' ;; \
+		*) echo >&2 "error: unsupported architecture: '$dpkgArch'"; exit 1 ;; \
+	esac; \
+	wget -O containerd.tar.gz "$url" --progress=dot:giga; \
+	echo "$sha256 *containerd.tar.gz" | sha256sum --strict --check -; \
+	tar -xvf containerd.tar.gz -C /usr/local/; \
+	rm containerd.tar.gz; \
+	containerd --version
+
+RUN set -eux; \
+	mkdir -p /run/containerd /var/lib/containerd; \
+	chmod 1777 /run/containerd /var/lib/containerd
+
+VOLUME /var/lib/containerd
+
+# add an entrypoint that does clever things if the container is run as non-root (cannot run containers, but content/image stores should work fine)
+COPY docker-entrypoint.sh /usr/local/bin/
+ENTRYPOINT ["docker-entrypoint.sh"]
+CMD ["containerd"]
+
+# the entrypoint will try to automatically determine intent based on uid/gid (and include the "dind" wrapper automatically)
+# if it does not, use "docker run ... dind containerd" if you want to run real containers (with "--privileged")
